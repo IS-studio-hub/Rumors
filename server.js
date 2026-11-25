@@ -13,6 +13,7 @@ import { router as adminRouter } from './src/routes/admin.js';
 import { router as publicRouter } from './src/routes/public.js';
 import { startRadarSchedule } from './src/radar.js';
 import { importContentIfEmpty } from './src/import-content.js';
+import { startAutomation } from './src/automation.js';
 
 await ensureBrandAssets();
 importContentIfEmpty();
@@ -51,6 +52,7 @@ app.use((err, req, res, _next) => {
 
 app.listen(config.port, '0.0.0.0', () => {
   startRadarSchedule();
+  startAutomation();
   console.log(`Rumors running at http://localhost:${config.port}  (admin: /admin)`);
 });
 

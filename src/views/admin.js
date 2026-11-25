@@ -10,7 +10,7 @@ const MESSAGES = {
   saved: 'Article saved.', created: 'Article created.', deleted: 'Article deleted.',
   uploaded: 'Image(s) uploaded.', replaced: 'Image replaced — every article using it now shows the new version.',
   imgsaved: 'Image details saved.', imgdeleted: 'Image deleted.', comment: 'Comment updated.', commentdeleted: 'Comment deleted.',
-  subrejected: 'Rumor rejected.', subdeleted: 'Submission and its files deleted.', scanning: 'Scan started. It takes about a minute. Refresh to see new finds.', finddeleted: 'Find deleted forever. Future scans will skip that story.', finddeletedall: 'All dismissed finds deleted forever. Future scans will skip those stories.', watchsaved: 'Watchlists saved. They are used from the next scan.', drafted: 'Draft created from the web find. Rewrite it in your own words before publishing.', aidone: 'The AI wrote this draft. Read it, check the facts and the photo, then publish.', writing: 'The AI is writing the article and looking for a free-to-use photo. This takes 1 to 3 minutes; this page refreshes by itself.', approved: 'Approved! A draft article was created from the tip. Edit it, add a cover photo, then publish.',
+  subrejected: 'Rumor rejected.', subdeleted: 'Submission and its files deleted.', scanning: 'Scan started. It takes about a minute. Refresh to see new finds.', finddeleted: 'Find deleted forever. Future scans will skip that story.', finddeletedall: 'All dismissed finds deleted forever. Future scans will skip those stories.', autosaved: 'Automation settings saved.', weeklystarted: 'Writing this week’s article from the hottest rumour. It will be published automatically in 1 to 3 minutes; this page refreshes by itself.', watchsaved: 'Watchlists saved. They are used from the next scan.', drafted: 'Draft created from the web find. Rewrite it in your own words before publishing.', aidone: 'The AI wrote this draft. Read it, check the facts and the photo, then publish.', writing: 'The AI is writing the article and looking for a free-to-use photo. This takes 1 to 3 minutes; this page refreshes by itself.', approved: 'Approved! A draft article was created from the tip. Edit it, add a cover photo, then publish.',
 };
 
 export function adminLayout(req, res, { title, body, active, refresh = 0 }) {
@@ -368,7 +368,7 @@ export function submissionPage(req, res, { s, job, aiOn }) {
 }
 
 
-export function radarPage(req, res, { jobFor, aiOn, finds, filter, question, q, questions, counts, lastRun, running, nextRun, celebs, places }) {
+export function radarPage(req, res, { auto, jobFor, aiOn, finds, filter, question, q, questions, counts, lastRun, running, nextRun, celebs, places }) {
   const qs = (o) => new URLSearchParams({ status: filter, ...(question ? { question } : {}), ...(q ? { q } : {}), ...o }).toString();
   const statusTab = (key, label) => html`<a href="/admin/radar?${qs({ status: key })}" ${filter === key ? html`aria-current="page"` : ''}>${label} <small>${counts[key] ?? ''}</small></a>`;
   const act = (f, action, label, cls = '', confirmText = '') => html`<form method="post" action="/admin/radar/${f.id}/${action}" ${confirmText ? html`data-confirm="${confirmText}"` : ''}>
@@ -383,16 +383,41 @@ export function radarPage(req, res, { jobFor, aiOn, finds, filter, question, q, 
     return html`${act(f, 'draft', j?.state === 'error' ? 'Try again' : aiOn ? 'Create draft' : 'Create draft', 'btn-primary')}${j?.state === 'error' ? html`<p class="find-error" role="alert">${j.error}</p>` : ''}`;
   };
   return adminLayout(req, res, {
-    title: 'Web radar', active: 'radar', refresh: writing || running ? 10 : 0,
+    title: 'Web radar', active: 'radar', refresh: writing || running || auto.weekly.writing ? 10 : 0,
     body: html`<div class="page-head">
       <h1>Web radar</h1>
       <form method="post" action="/admin/radar/scan"><input type="hidden" name="_csrf" value="${req.admin.csrf}">
         <button class="btn btn-primary" ${running ? html`disabled` : ''}>${running ? 'Scanning…' : 'Scan now'}</button></form>
     </div>
-    <p class="help">Every day the radar searches Google News and Toronto outlets (Daily Hive, Narcity) for celebrity sightings and rumours in Toronto, and keeps the relevant ones here.
+    <p class="help">Every day the radar searches Google News and Toronto outlets (Daily Hive, Narcity) for celebrity sightings and rumours in Toronto, and keeps the relevant ones from the last 7 days here (★ saved ones stay until you unsave them).
       ${lastRun ? html`Last scan: <strong>${timeAgo(lastRun.started_at)}</strong>, checked ${lastRun.checked} results, ${lastRun.added} new.` : 'No scan yet.'}
       Next scan: ${running ? 'running now' : nextRun}.</p>
     ${running ? html`<p class="flash" role="status">Scanning now. This takes about a minute. Refresh the page to see new finds.</p>` : ''}
+
+    ${(() => {
+      const w = auto.weekly;
+      let last = null; try { last = w.last ? JSON.parse(w.last) : null; } catch {}
+      let exp = null; try { exp = auto.expireLast ? JSON.parse(auto.expireLast) : null; } catch {}
+      return html`<details class="panel automation" ${w.writing || w.error ? html`open` : ''}>
+      <summary><strong>Automation</strong>: weekly article ${w.on ? 'on' : 'off'} · delete articles after ${auto.expireDays} days ${auto.expireOn ? 'on' : 'off'} · finds kept for 7 days</summary>
+      <form method="post" action="/admin/radar/automation" class="stack">
+        <input type="hidden" name="_csrf" value="${req.admin.csrf}">
+        <label class="check"><input type="checkbox" name="auto_weekly" ${w.on ? html`checked` : ''}> <span><strong>Every week, write and publish an article from the hottest rumour</strong> (Mondays after 10 a.m. Toronto time). The hottest find is the one with the best relevance, the most outlets covering it and the freshest date. ★ Saved finds get a boost.</span></label>
+        <label class="check"><input type="checkbox" name="auto_expire" ${auto.expireOn ? html`checked` : ''}> <span><strong>Delete published articles older than ${auto.expireDays} days</strong>, with their comments and any images no other article uses. Checked once a day. This cannot be undone.</span></label>
+        <button class="btn">Save automation settings</button>
+      </form>
+      <ul class="auto-status">
+        <li>Next weekly article: <strong>${w.on ? (w.writing ? 'writing now…' : w.next) : 'off'}</strong>${auto.hottest ? html`. Current hottest rumour: “${auto.hottest.title}” (${auto.hottest.mentions} ${auto.hottest.mentions === 1 ? 'outlet' : 'outlets'})` : '. No rumours from the last week yet.'}</li>
+        ${last ? html`<li>Last weekly article: <a href="/rumor/${last.slug}" target="_blank" rel="noopener">${last.title}</a> (${timeAgo(last.at)})</li>` : ''}
+        ${w.error ? html`<li class="find-error" role="alert">Last weekly attempt failed: ${w.error}</li>` : ''}
+        ${auto.expiring.length ? html`<li>Will be deleted within 7 days: ${auto.expiring.map((a, i) => html`${i ? ', ' : ''}<a href="/admin/articles/${a.id}/edit">${a.title}</a>`)}</li>` : html`<li>No articles are due for deletion in the next 7 days.</li>`}
+        ${exp ? html`<li>Last cleanup removed ${exp.count} ${exp.count === 1 ? 'article' : 'articles'} (${timeAgo(exp.at)}).</li>` : ''}
+      </ul>
+      <form method="post" action="/admin/radar/weekly-now" data-confirm="Write an article from the hottest rumour now and publish it straight to the live site?">
+        <input type="hidden" name="_csrf" value="${req.admin.csrf}"><button class="btn btn-primary" ${w.writing || !auto.hottest ? html`disabled` : ''}>${w.writing ? 'Writing…' : 'Publish this week’s article now'}</button>
+      </form>
+    </details>`;
+    })()}
 
     <nav class="q-chips" aria-label="Filter by question">
       <a href="/admin/radar?${qs({ question: '' })}" ${!question ? html`aria-current="page"` : ''}>All questions</a>
@@ -411,7 +436,7 @@ export function radarPage(req, res, { jobFor, aiOn, finds, filter, question, q, 
 
     ${filter === 'dismissed' && finds.length ? html`<form class="row bulk-delete" method="post" action="/admin/radar/dismissed/delete-all" data-confirm="Delete all ${counts.dismissed} dismissed finds forever? This cannot be undone, and future scans will skip these stories.">
       <input type="hidden" name="_csrf" value="${req.admin.csrf}"><button class="btn btn-danger">Delete all dismissed forever</button>
-      <span class="help">Dismissed finds are also cleared automatically after 30 days.</span></form>` : ''}
+      <span class="help">Finds older than 7 days are also cleared automatically.</span></form>` : ''}
     <ul class="finds">
       ${finds.map((f) => html`<li class="find ${f.status === 'saved' ? 'is-saved' : ''}">
         <div class="find-main">

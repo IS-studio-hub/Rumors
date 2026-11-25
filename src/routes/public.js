@@ -189,4 +189,9 @@ function fail(req, res, error, form = {}) {
   send(res, sendRumorPage(res, { token: signToken('tip', 0), error, form }), 400);
 }
 
-router.use((req, res) => send(res, notFoundPage(res), 404));
+router.use((req, res) => {
+  // Articles removed by the one-month expiry answer 410 Gone, so search engines drop them quickly.
+  const m = req.path.match(/^\/rumor\/([a-z0-9-]+)(\.md)?$/);
+  const gone = m && db.prepare('SELECT 1 FROM removed_articles WHERE slug = ?').get(m[1]);
+  send(res, notFoundPage(res), gone ? 410 : 404);
+});

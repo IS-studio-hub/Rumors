@@ -165,7 +165,9 @@ export async function runScan(trigger = 'schedule') {
 
   const insert = db.prepare(`INSERT OR IGNORE INTO web_finds (url, title_key, title, source, snippet, published_at, questions, celebrities, places, score)
     VALUES (?,?,?,?,?,?,?,?,?,?)`);
-  const seenTitle = db.prepare('SELECT 1 FROM web_finds WHERE title_key = ?');
+  const seenTitle = db.prepare('SELECT id FROM web_finds WHERE title_key = ?');
+  const bump = db.prepare('UPDATE web_finds SET mentions = mentions + 1 WHERE id = ?');
+  const bumped = new Set(); // count each outlet's copy once per scan
   const blocked = db.prepare('SELECT 1 FROM web_find_blocks WHERE title_key = ? OR url = ?');
 
   function consider(items, questionKey, requireToronto) {
@@ -173,12 +175,16 @@ export async function runScan(trigger = 'schedule') {
       checked++;
       const r = score(it, lists, questionKey);
       if (r.score < MIN_SCORE || (requireToronto && !r.toronto)) continue;
+      // Only the last week matters: older items are never stored.
+      if (it.published_at && Date.now() - new Date(it.published_at).getTime() > KEEP_DAYS * 864e5) continue;
       const key = titleKey(it.title);
-      if (seenTitle.get(key)) continue; // same story from another link
+      const dup = seenTitle.get(key);
+      if (dup) { if (!bumped.has(`${dup.id}|${it.link}`)) { bumped.add(`${dup.id}|${it.link}`); if (it.link !== db.prepare('SELECT url FROM web_finds WHERE id = ?').get(dup.id)?.url) bump.run(dup.id); } continue; } // same story from another link
       if (blocked.get(key, it.link)) continue; // deleted forever by an admin
       // Same story told by another outlet (e.g. ten sites covering one Drake moment): keep only the first.
-      const recent = db.prepare("SELECT title FROM web_finds WHERE found_at > datetime('now','-21 days') AND celebrities = ? ORDER BY id DESC LIMIT 200").all(r.celebrities.join(', '));
-      if (recent.some((x) => similar(x.title, it.title) >= 0.5)) continue;
+      const recent = db.prepare("SELECT id, title, url FROM web_finds WHERE found_at > datetime('now','-21 days') AND celebrities = ? ORDER BY id DESC LIMIT 200").all(r.celebrities.join(', '));
+      const same = recent.find((x) => similar(x.title, it.title) >= 0.5);
+      if (same) { if (same.url !== it.link && !bumped.has(`${same.id}|${it.link}`)) { bumped.add(`${same.id}|${it.link}`); bump.run(same.id); } continue; }
       const res = insert.run(it.link, key, it.title.slice(0, 300), it.source.slice(0, 120), it.snippet, it.published_at,
         r.questions.join(','), r.celebrities.join(', '), r.places.join(', '), r.score);
       if (res.changes) added++;
@@ -203,9 +209,7 @@ export async function runScan(trigger = 'schedule') {
       try { consider(parseFeed(await fetchFeed(f.url), f.name), 'now', false); }
       catch (e) { errors.push(`${f.name}: ${e.message}`); }
     }
-    // Housekeeping: forget dismissed finds after 30 days and unreviewed ones after 90.
-    db.prepare("DELETE FROM web_finds WHERE status = 'dismissed' AND found_at < datetime('now','-30 days')").run();
-    db.prepare("DELETE FROM web_finds WHERE status = 'new' AND found_at < datetime('now','-90 days')").run();
+    pruneFinds();
     db.prepare("DELETE FROM web_find_blocks WHERE created_at < datetime('now','-180 days')").run();
   } finally {
     db.prepare('UPDATE radar_runs SET finished_at = ?, checked = ?, added = ?, errors = ? WHERE id = ?')
@@ -214,6 +218,13 @@ export async function runScan(trigger = 'schedule') {
     running = false;
   }
   return { checked, added, errors: errors.length };
+}
+
+/** Keep only the last week of finds (by publish date). ★ Saved finds are kept until unsaved. */
+export const KEEP_DAYS = 7;
+export function pruneFinds() {
+  return db.prepare(`DELETE FROM web_finds WHERE status <> 'saved'
+    AND COALESCE(published_at, found_at) < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${KEEP_DAYS} days')`).run().changes;
 }
 
 /** Runs the scan once a day, shortly after 6 a.m. Toronto time (or at startup if a day was missed). */

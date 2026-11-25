@@ -14,6 +14,7 @@ import { createImage, replaceImage, deleteImage, getImage, imageUsage, publicIma
 import { renderMarkdown } from '../markdown.js';
 import { slugify } from '../html.js';
 import { aiEnabled, startDraft, jobFor } from '../ai-writer.js';
+import { weeklyStatus, runWeekly, hottestFind, expiringSoon, isOn, EXPIRE_DAYS } from '../automation.js';
 
 export const router = express.Router();
 
@@ -298,6 +299,7 @@ router.get('/radar', (req, res) => {
   const qStatus = filter === 'all' ? '' : 'AND status = ?';
   const questions = QUESTIONS.map((x) => ({ ...x, count: db.prepare(`SELECT COUNT(*) n FROM web_finds WHERE (',' || questions || ',') LIKE ? ${qStatus}`).get(`%,${x.key},%`, ...(filter === 'all' ? [] : [filter])).n }));
   send(res, radarPage(req, res, {
+    auto: { weekly: weeklyStatus(), hottest: hottestFind(), expiring: expiringSoon(), expireOn: isOn('auto_expire'), expireDays: EXPIRE_DAYS, expireLast: getSetting('expire_last') },
     jobFor, aiOn: aiEnabled(), finds, filter, question, q, questions, counts, running: isRunning(), nextRun: nextRunLabel(),
     lastRun: db.prepare('SELECT * FROM radar_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1').get(),
     celebs: getSetting('radar_celebs', DEFAULT_CELEBS.join(', ')), places: getSetting('radar_places', DEFAULT_PLACES.join(', ')),
@@ -323,6 +325,17 @@ const radarBack = (req, msg) => {
   if (msg) keep.set('msg', msg);
   return `/admin/radar?${keep}`;
 };
+
+// Automation switches and "publish this week's article now".
+router.post('/radar/automation', requireCsrf, (req, res) => {
+  setSetting('auto_weekly', req.body.auto_weekly === 'on' ? 'on' : 'off');
+  setSetting('auto_expire', req.body.auto_expire === 'on' ? 'on' : 'off');
+  res.redirect(303, '/admin/radar?msg=autosaved');
+});
+router.post('/radar/weekly-now', requireCsrf, (req, res) => {
+  const msg = runWeekly('manual');
+  res.redirect(303, `/admin/radar?${/^Writing/.test(msg) ? 'msg=weeklystarted' : `err=${encodeURIComponent(msg)}`}`);
+});
 
 // Delete forever (dismissed finds only). The story is remembered so later scans skip it.
 const forget = db.prepare("INSERT OR REPLACE INTO web_find_blocks (title_key, url) SELECT title_key, url FROM web_finds WHERE id = ? AND status = 'dismissed'");

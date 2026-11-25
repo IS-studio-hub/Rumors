@@ -128,6 +128,13 @@ CREATE TABLE IF NOT EXISTS web_find_blocks (
 );
 CREATE INDEX IF NOT EXISTS idx_web_find_blocks_url ON web_find_blocks(url);
 
+-- Articles removed by the one-month expiry: their URLs answer "410 Gone" so search engines drop them.
+CREATE TABLE IF NOT EXISTS removed_articles (
+  slug TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  removed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE TABLE IF NOT EXISTS radar_runs (
   id INTEGER PRIMARY KEY,
   started_at TEXT NOT NULL,
@@ -140,6 +147,11 @@ CREATE TABLE IF NOT EXISTS radar_runs (
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `);
+
+// How many outlets covered the same story (bumped when the scan skips a duplicate): used to find the hottest rumour.
+if (!db.prepare('PRAGMA table_info(web_finds)').all().some((c) => c.name === 'mentions')) {
+  db.exec('ALTER TABLE web_finds ADD COLUMN mentions INTEGER NOT NULL DEFAULT 1');
+}
 
 export const getSetting = (key, fallback = '') => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? fallback;
 export const setSetting = (key, value) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));

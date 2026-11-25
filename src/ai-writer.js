@@ -216,7 +216,7 @@ function insertDraft(a, lead, coverId) {
  * Start writing in the background. `onDone(articleId)` links the draft back to its lead.
  * `existingCoverId` (e.g. a reader's photo) skips the image search.
  */
-export function startDraft(key, lead, { onDone, existingCoverId = null } = {}) {
+export function startDraft(key, lead, { onDone, onError, existingCoverId = null } = {}) {
   if (jobs.get(key)?.state === 'writing') return;
   jobs.set(key, { state: 'writing', started: Date.now() });
   (async () => {
@@ -242,5 +242,6 @@ export function startDraft(key, lead, { onDone, existingCoverId = null } = {}) {
       : String(e.message || e).slice(0, 300);
     console.error('AI draft failed:', e);
     jobs.set(key, { state: 'error', error: msg });
+    onError?.(msg);
   });
 }
