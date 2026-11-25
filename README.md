@@ -35,7 +35,15 @@ Once a day, after 6 a.m. Toronto time, the server searches Google News and Toron
 
 Put `OPENAI_API_KEY=` (model set by `OPENAI_MODEL`, default `gpt-5`) or `ANTHROPIC_API_KEY=` in `.env`; no restart needed, and OpenAI is used when both are set. Then **Create draft** on a Web radar find (and **Approve** on a reader tip) asks the AI (with web search) to research the lead and write a full first-person article: title, excerpt, body, venue address, neighbourhood, tags, categories, FAQ and SEO fields. It runs in the background (1 to 3 minutes) and the page refreshes itself. A cover photo is picked automatically from **Wikimedia Commons**, only from freely licensed files (CC0, CC BY, CC BY-SA, public domain), and the required credit is saved as the caption. Reader tip photos are kept as the cover. Drafts are never published automatically.
 
-## Deploying
+## Live site (Railway + GitHub)
+
+- Live: https://rumors-production.up.railway.app (admin at `/admin`)
+- Code: https://github.com/IS-studio-hub/Rumors. Every push to `main` redeploys on Railway automatically.
+- The database and uploaded images live on a Railway volume mounted at `/data` (`DATA_DIR=/data/db`, `UPLOAD_DIR=/data/uploads`), so redeploys keep them.
+- On its very first start an empty server imports `content/` (published articles, their images and comments). Refresh that snapshot with `npm run export-content`. It is only used while the live database has no articles.
+- Secrets (`APP_SECRET`, `ADMIN_PASSWORD_HASH`, `OPENAI_API_KEY`) are Railway variables, never in the repo.
+
+## Deploying elsewhere
 
 Run behind HTTPS (Nginx, Caddy, Render, Fly.io, a VPS…). Set in the environment:
 
